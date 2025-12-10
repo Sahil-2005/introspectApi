@@ -163,9 +163,61 @@ const getDocuments = async (req, res) => {
   }
 };
 
+
+
+const connectCustomDb = async (req, res) => {
+  const { uri } = req.body;
+
+  if (!uri) {
+    return res.status(400).json({
+      ok: false,
+      message: "Field 'uri' (MongoDB connection string) is required in request body",
+    });
+  }
+
+  // Optional safety: allow only mongodb:// or mongodb+srv://
+  if (!uri.startsWith("mongodb://") && !uri.startsWith("mongodb+srv://")) {
+    return res.status(400).json({
+      ok: false,
+      message: "Invalid MongoDB URI. It should start with mongodb:// or mongodb+srv://",
+    });
+  }
+
+  try {
+    // If already connected or connecting, disconnect first
+    if (mongoose.connection.readyState === 1 || mongoose.connection.readyState === 2) {
+      await mongoose.disconnect();
+    }
+
+    // Connect to the provided URI
+    await mongoose.connect(uri, {
+      // add any options you like here
+      maxPoolSize: 5,
+      serverSelectionTimeoutMS: 5000,
+    });
+
+    const state = mongoose.connection.readyState; // 0,1,2,3
+    const states = ["disconnected", "connected", "connecting", "disconnecting"];
+
+    return res.status(200).json({
+      ok: true,
+      message: "Connected to custom MongoDB successfully",
+      connectionState: states[state] || state,
+    });
+  } catch (error) {
+    console.error("Custom DB connect failed:", error);
+    return res.status(500).json({
+      ok: false,
+      message: "Failed to connect to custom MongoDB",
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   checkConnection,
   listDatabases,
   listCollections,
   getDocuments,
+  connectCustomDb
 };

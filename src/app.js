@@ -1,11 +1,15 @@
 // src/app.js
 const express = require("express");
+const cors = require("cors");
 const introspectRoutes = require("./routes/introspectRoutes");
+
+const relationsRoutes = require("./routes/relationsRoutes");
 
 const app = express();
 
 // Global middlewares
 app.use(express.json());
+app.use(cors());
 
 // Base route
 app.get("/", (req, res) => {
@@ -16,6 +20,7 @@ app.get("/", (req, res) => {
 
 // Mount introspection routes under /api
 app.use("/api/introspect", introspectRoutes);
+app.use("/api/relations", relationsRoutes);
 
 // Health alias at /api/health
 const { checkConnection } = require("./controllers/introspectController");

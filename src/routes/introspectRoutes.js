@@ -5,9 +5,14 @@ const {
   listDatabases,
   listCollections,
   getDocuments,
+  connectCustomDb
 } = require("../controllers/introspectController");
 
 const router = express.Router();
+
+
+router.post("/connect", connectCustomDb);
+
 
 // Health / connection
 router.get("/health", checkConnection);
