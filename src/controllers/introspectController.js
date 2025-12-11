@@ -163,7 +163,56 @@ const getDocuments = async (req, res) => {
   }
 };
 
+/**
+ * GET /api/introspect/columns?dbName=...&collectionName=...
+ * List unique top-level fields for a given collection
+ */
+const listColumns = async (req, res) => {
+  const { dbName, collectionName } = req.query;
 
+  if (!dbName || !collectionName) {
+    return res.status(400).json({
+      ok: false,
+      message: "Query params dbName and collectionName are required",
+    });
+  }
+
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        ok: false,
+        message: "Mongoose is not connected",
+      });
+    }
+
+    const db = mongoose.connection.client.db(dbName);
+    const collection = db.collection(collectionName);
+
+    const sampleDocs = await collection.find({}).limit(100).toArray();
+    const columnsSet = new Set();
+
+    sampleDocs.forEach((doc) => {
+      Object.keys(doc || {}).forEach((key) => columnsSet.add(key));
+    });
+
+    const columns = Array.from(columnsSet).sort();
+
+    return res.json({
+      ok: true,
+      dbName,
+      collectionName,
+      columnsCount: columns.length,
+      columns,
+    });
+  } catch (err) {
+    console.error("List columns failed:", err);
+    return res.status(500).json({
+      ok: false,
+      message: "Failed to list columns",
+      error: err.message,
+    });
+  }
+};
 
 const connectCustomDb = async (req, res) => {
   const { uri } = req.body;
@@ -219,5 +268,6 @@ module.exports = {
   listDatabases,
   listCollections,
   getDocuments,
-  connectCustomDb
+  connectCustomDb,
+  listColumns
 };

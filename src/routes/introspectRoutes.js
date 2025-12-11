@@ -5,7 +5,8 @@ const {
   listDatabases,
   listCollections,
   getDocuments,
-  connectCustomDb
+  connectCustomDb,
+  listColumns
 } = require("../controllers/introspectController");
 
 const router = express.Router();
@@ -21,5 +22,6 @@ router.get("/health", checkConnection);
 router.get("/databases", listDatabases);
 router.get("/collections", listCollections);
 router.get("/documents", getDocuments);
+router.get("/colums", listColumns);
 
 module.exports = router;
