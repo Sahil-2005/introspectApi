@@ -4,6 +4,7 @@ const cors = require("cors");
 const introspectRoutes = require("./routes/introspectRoutes");
 
 const relationsRoutes = require("./routes/relationsRoutes");
+const backendApiRoutes = require("./routes/backendApiRoutes");
 
 const app = express();
 
@@ -21,6 +22,7 @@ app.get("/", (req, res) => {
 // Mount introspection routes under /api
 app.use("/api/introspect", introspectRoutes);
 app.use("/api/relations", relationsRoutes);
+app.use("/api/backend-apis", backendApiRoutes);
 
 // Health alias at /api/health
 const { checkConnection } = require("./controllers/introspectController");
