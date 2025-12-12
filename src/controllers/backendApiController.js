@@ -153,24 +153,24 @@ const executeBackendApi = async (req, res) => {
 
         // build setFields only for columns explicitly provided in the payload
         // and ignore empty-string values coming from clients (treat them as "no change")
+        // Fetch current document so we don't accidentally overwrite unchanged fields
+        const existingDoc = await collection.findOne(filter);
+        if (!existingDoc) {
+          return res.status(404).json({ ok: false, message: "Document to update not found" });
+        }
+
+        // build setFields only for columns explicitly provided in the payload
+        // and ignore empty-string values coming from clients (treat them as "no change")
         const setFields = {};
         for (const col of allowedUpdateCols) {
           if (Object.prototype.hasOwnProperty.call(item, col)) {
-            const val = item[col];
-            // Skip empty-string values which are often sent by forms for untouched inputs
-            if (val === "") continue;
-            // If client explicitly sends null, treat it as a set-to-null (not unset).
-            // If you prefer to $unset on null, change logic here.
-            setFields[col] = val;
+            setFields[col] = item[col];
+          } else {
+            // if not provided, set to empty string as per UI behavior (you can change this policy)
+            setFields[col] = "";
           }
         }
 
-        // If no editable fields were provided, reject the request for that item
-        if (Object.keys(setFields).length === 0) {
-          return res.status(400).json({ ok: false, message: `No updatable fields provided for match field "${matchField}"` });
-        }
-
-        // Always mark as updated when there are changes
         setFields.updatedAt = now;
 
         ops.push({ filter, update: { $set: setFields }, options: { upsert: false } });
