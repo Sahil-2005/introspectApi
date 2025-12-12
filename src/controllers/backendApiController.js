@@ -145,17 +145,32 @@ const executeBackendApi = async (req, res) => {
           filter = { [matchField]: tryObjectId(matchVal) };
         }
 
-        // build setFields only from allowedUpdateCols (ignore any other keys)
+        // Fetch current document so we don't accidentally overwrite unchanged fields
+        const existingDoc = await collection.findOne(filter);
+        if (!existingDoc) {
+          return res.status(404).json({ ok: false, message: "Document to update not found" });
+        }
+
+        // build setFields only for columns explicitly provided in the payload
+        // and ignore empty-string values coming from clients (treat them as "no change")
         const setFields = {};
         for (const col of allowedUpdateCols) {
           if (Object.prototype.hasOwnProperty.call(item, col)) {
-            setFields[col] = item[col];
-          } else {
-            // if not provided, set to empty string as per UI behavior (you can change this policy)
-            setFields[col] = "";
+            const val = item[col];
+            // Skip empty-string values which are often sent by forms for untouched inputs
+            if (val === "") continue;
+            // If client explicitly sends null, treat it as a set-to-null (not unset).
+            // If you prefer to $unset on null, change logic here.
+            setFields[col] = val;
           }
         }
 
+        // If no editable fields were provided, reject the request for that item
+        if (Object.keys(setFields).length === 0) {
+          return res.status(400).json({ ok: false, message: `No updatable fields provided for match field "${matchField}"` });
+        }
+
+        // Always mark as updated when there are changes
         setFields.updatedAt = now;
 
         ops.push({ filter, update: { $set: setFields }, options: { upsert: false } });
@@ -192,9 +207,75 @@ const executeBackendApi = async (req, res) => {
       });
     }
 
+
+    // DELETE — remove doc(s) using configurable single match field
+    if (method === "DELETE") {
+      // Accept single payload object or array of objects that each contain the matchField value.
+      const incoming = Array.isArray(payload) ? payload : [payload];
+      if (incoming.length === 0) {
+        return res.status(400).json({ ok: false, message: "Empty payload for DELETE" });
+      }
+
+      const matchField = (api.meta && api.meta.matchField) ? String(api.meta.matchField) : "_id";
+
+      // We'll collect deleted docs (found before deletion) and counts
+      const deletedDocs = [];
+      let totalDeleted = 0;
+
+      for (const item of incoming) {
+        // get the identifier value from the payload depending on matchField
+        let matchVal = item[matchField];
+
+        // fallback to common fields if user gave id/_id when matchField is different
+        if (matchVal === undefined && (item._id !== undefined)) matchVal = item._id;
+        if (matchVal === undefined && (item.id !== undefined)) matchVal = item.id;
+
+        if (matchVal === undefined || matchVal === null || matchVal === "") {
+          return res.status(400).json({ ok: false, message: `Each DELETE payload must include the match field "${matchField}" (or _id/id) as criteria` });
+        }
+
+        let filter;
+        if (matchField === "_id") {
+          try {
+            filter = { _id: new mongoose.Types.ObjectId(matchVal) };
+          } catch (e) {
+            return res.status(400).json({ ok: false, message: `Invalid _id: ${matchVal}` });
+          }
+        } else {
+          filter = { [matchField]: tryObjectId(matchVal) };
+        }
+
+        // find docs to delete (so we can return them)
+        const docsToDelete = await collection.find(filter).toArray();
+
+        if (docsToDelete.length === 0) {
+          // continue - nothing to delete for this criteria
+          continue;
+        }
+
+        // deleteMany to remove all matching documents for that criteria
+        const delRes = await collection.deleteMany(filter);
+        totalDeleted += (delRes.deletedCount || 0);
+
+        // push cleaned copies (remove internal fields like __v)
+        docsToDelete.forEach((d) => {
+          const clone = { ...d };
+          if (clone.__v !== undefined) delete clone.__v;
+          deletedDocs.push(clone);
+        });
+      }
+
+      return res.status(200).json({
+        ok: true,
+        method,
+        deletedCount: totalDeleted,
+        data: deletedDocs,
+      });
+    }
+
     // POST — create new docs (existing behavior)
     if (method !== "POST") {
-      return res.status(400).json({ ok: false, message: "Only POST is supported for execution (for now)" });
+      return res.status(400).json({ ok: false, message: "Only POST/PUT/DELETE are supported for execution (for now)" });
     }
 
     const incoming = Array.isArray(payload) ? payload : [payload];
