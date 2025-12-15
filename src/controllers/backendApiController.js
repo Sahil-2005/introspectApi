@@ -1,5 +1,3 @@
-
-// // controllers/backendApiController.js
 // const BackendApi = require("../models/backendApi");
 // const mongoose = require("mongoose");
 
@@ -107,11 +105,8 @@
 //         return res.status(400).json({ ok: false, message: "Empty payload for PUT" });
 //       }
 
-//       // matchField decides which field to use as filter (default _id)
 //       const matchField = (api.meta && api.meta.matchField) ? String(api.meta.matchField) : "_id";
 
-//       // determine which columns are allowed to be updated: use api.columns (same as POST fields),
-//       // exclude system fields and the matchField itself
 //       const BODY_FIELD_EXCLUDE = new Set(["_id", "id", "__v", "createdAt", "updatedAt", "created_at", "updated_at"]);
 //       const allowedUpdateCols = (api.columns || []).filter((c) => !BODY_FIELD_EXCLUDE.has(c) && c !== matchField);
 
@@ -121,10 +116,7 @@
 
 //       const ops = [];
 //       for (const item of incoming) {
-//         // get the identifier value from the payload depending on matchField
 //         let matchVal = item[matchField];
-
-//         // fallback to common fields if user gave id/_id when matchField is different
 //         if (matchVal === undefined && (item._id !== undefined)) matchVal = item._id;
 //         if (matchVal === undefined && (item.id !== undefined)) matchVal = item.id;
 
@@ -132,48 +124,36 @@
 //           return res.status(400).json({ ok: false, message: `Each PUT payload must include the match field "${matchField}" (or _id/id) as criteria` });
 //         }
 
-//         // build filter
 //         let filter;
 //         if (matchField === "_id") {
-//           // require ObjectId for _id
 //           try {
 //             filter = { _id: new mongoose.Types.ObjectId(matchVal) };
 //           } catch (e) {
 //             return res.status(400).json({ ok: false, message: `Invalid _id: ${matchVal}` });
 //           }
 //         } else {
-//           // if it looks like an ObjectId string try to convert; else use as-is
 //           filter = { [matchField]: tryObjectId(matchVal) };
 //         }
 
-//         // Fetch current document so we don't accidentally overwrite unchanged fields
 //         const existingDoc = await collection.findOne(filter);
 //         if (!existingDoc) {
 //           return res.status(404).json({ ok: false, message: "Document to update not found" });
 //         }
 
-//         // build setFields only for columns explicitly provided in the payload
-//         // and ignore empty-string values coming from clients (treat them as "no change")
 //         const setFields = {};
 //         for (const col of allowedUpdateCols) {
 //           if (Object.prototype.hasOwnProperty.call(item, col)) {
 //             const val = item[col];
-//             // Skip empty-string values which are often sent by forms for untouched inputs
-//             if (val === "") continue;
-//             // If client explicitly sends null, treat it as a set-to-null (not unset).
-//             // If you prefer to $unset on null, change logic here.
+//             if (val === "") continue; // skip empty-string (no change)
 //             setFields[col] = val;
 //           }
 //         }
 
-//         // If no editable fields were provided, reject the request for that item
 //         if (Object.keys(setFields).length === 0) {
 //           return res.status(400).json({ ok: false, message: `No updatable fields provided for match field "${matchField}"` });
 //         }
 
-//         // Always mark as updated when there are changes
 //         setFields.updatedAt = now;
-
 //         ops.push({ filter, update: { $set: setFields }, options: { upsert: false } });
 //       }
 
@@ -183,16 +163,12 @@
 //         updateResults.push(r);
 //       }
 
-//       // gather updated documents
 //       const filters = ops.map((o) => o.filter);
-//       // combine filters with $or
 //       let query = {};
 //       if (filters.length === 1) query = filters[0];
 //       else query = { $or: filters };
 
 //       let updatedDocs = await collection.find(query).toArray();
-
-//       // remove internal fields before returning (like __v)
 //       updatedDocs = updatedDocs.map((d) => {
 //         const clone = { ...d };
 //         if (clone.__v !== undefined) delete clone.__v;
@@ -205,71 +181,6 @@
 //         matchedCount: updateResults.reduce((s, r) => s + (r.matchedCount || 0), 0),
 //         modifiedCount: updateResults.reduce((s, r) => s + (r.modifiedCount || 0), 0),
 //         data: updatedDocs,
-//       });
-//     }
-
-//     // DELETE — remove doc(s) using configurable single match field
-//     if (method === "DELETE") {
-//       // Accept single payload object or array of objects that each contain the matchField value.
-//       const incoming = Array.isArray(payload) ? payload : [payload];
-//       if (incoming.length === 0) {
-//         return res.status(400).json({ ok: false, message: "Empty payload for DELETE" });
-//       }
-
-//       const matchField = (api.meta && api.meta.matchField) ? String(api.meta.matchField) : "_id";
-
-//       // We'll collect deleted docs (found before deletion) and counts
-//       const deletedDocs = [];
-//       let totalDeleted = 0;
-
-//       for (const item of incoming) {
-//         // get the identifier value from the payload depending on matchField
-//         let matchVal = item[matchField];
-
-//         // fallback to common fields if user gave id/_id when matchField is different
-//         if (matchVal === undefined && (item._id !== undefined)) matchVal = item._id;
-//         if (matchVal === undefined && (item.id !== undefined)) matchVal = item.id;
-
-//         if (matchVal === undefined || matchVal === null || matchVal === "") {
-//           return res.status(400).json({ ok: false, message: `Each DELETE payload must include the match field "${matchField}" (or _id/id) as criteria` });
-//         }
-
-//         let filter;
-//         if (matchField === "_id") {
-//           try {
-//             filter = { _id: new mongoose.Types.ObjectId(matchVal) };
-//           } catch (e) {
-//             return res.status(400).json({ ok: false, message: `Invalid _id: ${matchVal}` });
-//           }
-//         } else {
-//           filter = { [matchField]: tryObjectId(matchVal) };
-//         }
-
-//         // find docs to delete (so we can return them)
-//         const docsToDelete = await collection.find(filter).toArray();
-
-//         if (docsToDelete.length === 0) {
-//           // continue - nothing to delete for this criteria
-//           continue;
-//         }
-
-//         // deleteMany to remove all matching documents for that criteria
-//         const delRes = await collection.deleteMany(filter);
-//         totalDeleted += (delRes.deletedCount || 0);
-
-//         // push cleaned copies (remove internal fields like __v)
-//         docsToDelete.forEach((d) => {
-//           const clone = { ...d };
-//           if (clone.__v !== undefined) delete clone.__v;
-//           deletedDocs.push(clone);
-//         });
-//       }
-
-//       return res.status(200).json({
-//         ok: true,
-//         method,
-//         deletedCount: totalDeleted,
-//         data: deletedDocs,
 //       });
 //     }
 
@@ -300,14 +211,66 @@
 //         return res.status(404).json({ ok: false, message: "No data found for the provided criteria" });
 //       }
 
-//       // clean internal fields before returning
 //       const cleanDoc = { ...doc };
 //       if (cleanDoc.__v !== undefined) delete cleanDoc.__v;
 
 //       return res.status(200).json({ ok: true, method, data: cleanDoc });
 //     }
 
-//     // POST — create new docs (existing behavior)
+//     // DELETE — remove doc(s) using configurable single match field
+//     if (method === "DELETE") {
+//       const incoming = Array.isArray(payload) ? payload : [payload];
+//       if (incoming.length === 0) {
+//         return res.status(400).json({ ok: false, message: "Empty payload for DELETE" });
+//       }
+
+//       const matchField = (api.meta && api.meta.matchField) ? String(api.meta.matchField) : "_id";
+
+//       const deletedDocs = [];
+//       let totalDeleted = 0;
+
+//       for (const item of incoming) {
+//         let matchVal = item[matchField];
+//         if (matchVal === undefined && (item._id !== undefined)) matchVal = item._id;
+//         if (matchVal === undefined && (item.id !== undefined)) matchVal = item.id;
+
+//         if (matchVal === undefined || matchVal === null || matchVal === "") {
+//           return res.status(400).json({ ok: false, message: `Each DELETE payload must include the match field "${matchField}" (or _id/id) as criteria` });
+//         }
+
+//         let filter;
+//         if (matchField === "_id") {
+//           try {
+//             filter = { _id: new mongoose.Types.ObjectId(matchVal) };
+//           } catch (e) {
+//             return res.status(400).json({ ok: false, message: `Invalid _id: ${matchVal}` });
+//           }
+//         } else {
+//           filter = { [matchField]: tryObjectId(matchVal) };
+//         }
+
+//         const docsToDelete = await collection.find(filter).toArray();
+//         if (docsToDelete.length === 0) continue;
+
+//         const delRes = await collection.deleteMany(filter);
+//         totalDeleted += (delRes.deletedCount || 0);
+
+//         docsToDelete.forEach((d) => {
+//           const clone = { ...d };
+//           if (clone.__v !== undefined) delete clone.__v;
+//           deletedDocs.push(clone);
+//         });
+//       }
+
+//       return res.status(200).json({
+//         ok: true,
+//         method,
+//         deletedCount: totalDeleted,
+//         data: deletedDocs,
+//       });
+//     }
+
+//     // POST — create new docs (insert)
 //     if (method !== "POST") {
 //       return res.status(400).json({ ok: false, message: "Only POST/PUT/DELETE/FETCH are supported for execution (for now)" });
 //     }
@@ -360,11 +323,10 @@
 //   deleteBackendApi,
 //   executeBackendApi,
 // };
-
-// controllers/backendApiController.js
 const BackendApi = require("../models/backendApi");
 const mongoose = require("mongoose");
 
+// ... (createBackendApi, listBackendApis, deleteBackendApi remain unchanged) ...
 const createBackendApi = async (req, res) => {
   try {
     const {
@@ -462,222 +424,227 @@ const executeBackendApi = async (req, res) => {
       return val;
     };
 
-    // PUT — update existing doc(s) using configurable single match field
+    // Helper to build filter based on matchField
+    const buildFilter = (meta, payloadItem) => {
+        const matchField = (meta && meta.matchField) ? String(meta.matchField) : "_id";
+        
+        // If the payload has the key, we use it. If not, we return empty filter (match all)
+        // unless it's strictly required by specific methods logic.
+        let matchVal = payloadItem[matchField];
+        if (matchVal === undefined && (payloadItem._id !== undefined)) matchVal = payloadItem._id;
+        if (matchVal === undefined && (payloadItem.id !== undefined)) matchVal = payloadItem.id;
+        
+        if (matchVal === undefined || matchVal === null || matchVal === "") {
+            return {}; // No filter
+        }
+
+        if (matchField === "_id") {
+            try {
+                return { _id: new mongoose.Types.ObjectId(matchVal) };
+            } catch (e) {
+                return { _id: matchVal }; // Fallback
+            }
+        }
+        return { [matchField]: tryObjectId(matchVal) };
+    };
+
+    // -------------------------------------------------------------------------
+    // AGGREGATION HANDLERS
+    // -------------------------------------------------------------------------
+    
+    // COUNT: Counts documents matching the criteria
+    if (method === "COUNT") {
+        const filter = buildFilter(api.meta, payload);
+        const count = await collection.countDocuments(filter);
+        return res.status(200).json({ ok: true, method, data: { count } });
+    }
+
+    // SUM, AVG, MIN, MAX
+    // SUM, AVG, MIN, MAX
+    if (["SUM", "AVG", "MIN", "MAX"].includes(method)) {
+        const aggregateField = api.meta?.aggregateField;
+        if (!aggregateField) {
+             return res.status(400).json({ ok: false, message: `${method} requires an 'aggregateField' to be defined in API settings.` });
+        }
+
+        const filter = buildFilter(api.meta, payload);
+        const operator = `$${method.toLowerCase()}`; // $sum, $avg, $min, $max
+
+        const pipeline = [
+            { $match: filter },
+            // Add a conversion stage to handle Strings that look like Numbers
+            {
+                $project: {
+                    convertedValue: {
+                        $convert: {
+                            input: `$${aggregateField}`,
+                            to: "double",       // Attempt to convert to Number
+                            onError: 0,         // If conversion fails (e.g. "abc"), use 0
+                            onNull: 0           // If field is missing, use 0
+                        }
+                    }
+                }
+            },
+            { 
+                $group: { 
+                    _id: null, 
+                    result: { [operator]: "$convertedValue" } 
+                } 
+            }
+        ];
+
+        const result = await collection.aggregate(pipeline).toArray();
+        const value = result.length > 0 ? result[0].result : 0;
+        return res.status(200).json({ ok: true, method, data: { [aggregateField]: value } });
+    }
+
+    // GROUP_BY: Groups by a specific field and counts occurrences
+    if (method === "GROUP_BY") {
+        const aggregateField = api.meta?.aggregateField;
+        if (!aggregateField) {
+             return res.status(400).json({ ok: false, message: "GROUP_BY requires an 'aggregateField' (the field to group by)." });
+        }
+        
+        const filter = buildFilter(api.meta, payload);
+
+        const pipeline = [
+            { $match: filter },
+            { 
+                $group: { 
+                    _id: `$${aggregateField}`, 
+                    count: { $sum: 1 } 
+                } 
+            },
+            { $sort: { count: -1 } }, // Sort by highest count
+            { $limit: 100 } // Safety limit
+        ];
+
+        const result = await collection.aggregate(pipeline).toArray();
+        return res.status(200).json({ ok: true, method, data: result });
+    }
+
+    // -------------------------------------------------------------------------
+    // EXISTING CRUD HANDLERS
+    // -------------------------------------------------------------------------
+
+    // PUT
     if (method === "PUT") {
       const incoming = Array.isArray(payload) ? payload : [payload];
-      if (incoming.length === 0) {
-        return res.status(400).json({ ok: false, message: "Empty payload for PUT" });
-      }
-
+      if (incoming.length === 0) return res.status(400).json({ ok: false, message: "Empty payload for PUT" });
+      
       const matchField = (api.meta && api.meta.matchField) ? String(api.meta.matchField) : "_id";
-
       const BODY_FIELD_EXCLUDE = new Set(["_id", "id", "__v", "createdAt", "updatedAt", "created_at", "updated_at"]);
       const allowedUpdateCols = (api.columns || []).filter((c) => !BODY_FIELD_EXCLUDE.has(c) && c !== matchField);
 
-      if (allowedUpdateCols.length === 0) {
-        return res.status(400).json({ ok: false, message: "No editable columns available for this PUT API." });
-      }
+      if (allowedUpdateCols.length === 0) return res.status(400).json({ ok: false, message: "No editable columns available." });
 
       const ops = [];
       for (const item of incoming) {
+        // Strict check for match value presence for PUT
         let matchVal = item[matchField];
         if (matchVal === undefined && (item._id !== undefined)) matchVal = item._id;
         if (matchVal === undefined && (item.id !== undefined)) matchVal = item.id;
 
-        if (matchVal === undefined || matchVal === null || matchVal === "") {
-          return res.status(400).json({ ok: false, message: `Each PUT payload must include the match field "${matchField}" (or _id/id) as criteria` });
+        if (matchVal === undefined || matchVal === "") {
+             return res.status(400).json({ ok: false, message: `PUT requires value for match field "${matchField}"` });
         }
-
-        let filter;
-        if (matchField === "_id") {
-          try {
-            filter = { _id: new mongoose.Types.ObjectId(matchVal) };
-          } catch (e) {
-            return res.status(400).json({ ok: false, message: `Invalid _id: ${matchVal}` });
-          }
-        } else {
-          filter = { [matchField]: tryObjectId(matchVal) };
-        }
-
-        const existingDoc = await collection.findOne(filter);
-        if (!existingDoc) {
-          return res.status(404).json({ ok: false, message: "Document to update not found" });
-        }
-
+        
+        const filter = buildFilter(api.meta, item); // Re-use helper
+        
         const setFields = {};
         for (const col of allowedUpdateCols) {
           if (Object.prototype.hasOwnProperty.call(item, col)) {
             const val = item[col];
-            if (val === "") continue; // skip empty-string (no change)
+            if (val === "") continue;
             setFields[col] = val;
           }
         }
-
-        if (Object.keys(setFields).length === 0) {
-          return res.status(400).json({ ok: false, message: `No updatable fields provided for match field "${matchField}"` });
-        }
+        if (Object.keys(setFields).length === 0) continue;
 
         setFields.updatedAt = now;
-        ops.push({ filter, update: { $set: setFields }, options: { upsert: false } });
+        ops.push({ filter, update: { $set: setFields } });
       }
+
+      if(ops.length === 0) return res.status(400).json({ ok: false, message: "No valid updates found." });
 
       const updateResults = [];
       for (const op of ops) {
-        const r = await collection.updateOne(op.filter, op.update, op.options);
+        const r = await collection.updateOne(op.filter, op.update);
         updateResults.push(r);
       }
-
-      const filters = ops.map((o) => o.filter);
-      let query = {};
-      if (filters.length === 1) query = filters[0];
-      else query = { $or: filters };
-
-      let updatedDocs = await collection.find(query).toArray();
-      updatedDocs = updatedDocs.map((d) => {
-        const clone = { ...d };
-        if (clone.__v !== undefined) delete clone.__v;
-        return clone;
-      });
-
+      
       return res.status(200).json({
         ok: true,
         method,
-        matchedCount: updateResults.reduce((s, r) => s + (r.matchedCount || 0), 0),
         modifiedCount: updateResults.reduce((s, r) => s + (r.modifiedCount || 0), 0),
-        data: updatedDocs,
+        data: { message: "Update complete" }, // Simplified return
       });
     }
 
-    // FETCH — retrieve a single doc by configurable match field
+    // FETCH
     if (method === "FETCH") {
-      const matchField = (api.meta && api.meta.matchField) ? String(api.meta.matchField) : "_id";
-      let matchVal = payload[matchField];
-      if (matchVal === undefined && (payload._id !== undefined)) matchVal = payload._id;
-      if (matchVal === undefined && (payload.id !== undefined)) matchVal = payload.id;
-
-      if (matchVal === undefined || matchVal === null || matchVal === "") {
-        return res.status(400).json({ ok: false, message: `FETCH requires value for match field "${matchField}" (or _id/id)` });
-      }
-
-      let filter;
-      if (matchField === "_id") {
-        try {
-          filter = { _id: new mongoose.Types.ObjectId(matchVal) };
-        } catch (e) {
-          return res.status(400).json({ ok: false, message: `Invalid _id: ${matchVal}` });
-        }
-      } else {
-        filter = { [matchField]: tryObjectId(matchVal) };
+      const filter = buildFilter(api.meta, payload);
+      // Ensure strictly that filter is not empty (FETCH requires ID/Criteria)
+      if(Object.keys(filter).length === 0) {
+          return res.status(400).json({ ok: false, message: "FETCH requires criteria." });
       }
 
       const doc = await collection.findOne(filter);
-      if (!doc) {
-        return res.status(404).json({ ok: false, message: "No data found for the provided criteria" });
-      }
-
+      if (!doc) return res.status(404).json({ ok: false, message: "No data found" });
+      
       const cleanDoc = { ...doc };
       if (cleanDoc.__v !== undefined) delete cleanDoc.__v;
 
       return res.status(200).json({ ok: true, method, data: cleanDoc });
     }
 
-    // DELETE — remove doc(s) using configurable single match field
+    // DELETE
     if (method === "DELETE") {
       const incoming = Array.isArray(payload) ? payload : [payload];
-      if (incoming.length === 0) {
-        return res.status(400).json({ ok: false, message: "Empty payload for DELETE" });
-      }
-
-      const matchField = (api.meta && api.meta.matchField) ? String(api.meta.matchField) : "_id";
+      if (incoming.length === 0) return res.status(400).json({ ok: false, message: "Empty payload" });
 
       const deletedDocs = [];
       let totalDeleted = 0;
 
       for (const item of incoming) {
-        let matchVal = item[matchField];
-        if (matchVal === undefined && (item._id !== undefined)) matchVal = item._id;
-        if (matchVal === undefined && (item.id !== undefined)) matchVal = item.id;
-
-        if (matchVal === undefined || matchVal === null || matchVal === "") {
-          return res.status(400).json({ ok: false, message: `Each DELETE payload must include the match field "${matchField}" (or _id/id) as criteria` });
+        const filter = buildFilter(api.meta, item);
+        if(Object.keys(filter).length === 0) {
+             return res.status(400).json({ ok: false, message: "DELETE requires criteria." });
         }
-
-        let filter;
-        if (matchField === "_id") {
-          try {
-            filter = { _id: new mongoose.Types.ObjectId(matchVal) };
-          } catch (e) {
-            return res.status(400).json({ ok: false, message: `Invalid _id: ${matchVal}` });
-          }
-        } else {
-          filter = { [matchField]: tryObjectId(matchVal) };
-        }
-
+        
         const docsToDelete = await collection.find(filter).toArray();
         if (docsToDelete.length === 0) continue;
 
         const delRes = await collection.deleteMany(filter);
         totalDeleted += (delRes.deletedCount || 0);
+        docsToDelete.forEach((d) => deletedDocs.push(d));
+      }
 
-        docsToDelete.forEach((d) => {
-          const clone = { ...d };
-          if (clone.__v !== undefined) delete clone.__v;
-          deletedDocs.push(clone);
+      return res.status(200).json({ ok: true, method, deletedCount: totalDeleted, data: deletedDocs });
+    }
+
+    // POST (Insert)
+    if (method === "POST") {
+        const incoming = Array.isArray(payload) ? payload : [payload];
+        const docs = incoming.map((item = {}) => {
+        const doc = { ...item };
+        try { doc._id = doc._id ? new mongoose.Types.ObjectId(doc._id) : new mongoose.Types.ObjectId(); } 
+        catch { doc._id = new mongoose.Types.ObjectId(); }
+        if (!doc.id) doc.id = doc._id.toString();
+        doc.createdAt = doc.createdAt || doc.created_at || now;
+        doc.updatedAt = now;
+        return doc;
         });
-      }
 
-      return res.status(200).json({
-        ok: true,
-        method,
-        deletedCount: totalDeleted,
-        data: deletedDocs,
-      });
+        const insertRes = await collection.insertMany(docs);
+        return res.status(201).json({ ok: true, method, insertedCount: insertRes.insertedCount, data: docs });
     }
 
-    // POST — create new docs (insert)
-    if (method !== "POST") {
-      return res.status(400).json({ ok: false, message: "Only POST/PUT/DELETE/FETCH are supported for execution (for now)" });
-    }
+    return res.status(400).json({ ok: false, message: "Method not supported" });
 
-    const incoming = Array.isArray(payload) ? payload : [payload];
-    const docs = incoming.map((item = {}) => {
-      const doc = { ...item };
-      try {
-        doc._id = doc._id ? new mongoose.Types.ObjectId(doc._id) : new mongoose.Types.ObjectId();
-      } catch {
-        doc._id = new mongoose.Types.ObjectId();
-      }
-      if (!doc.id) doc.id = doc._id.toString();
-      doc.createdAt = doc.createdAt || doc.created_at || now;
-      doc.updatedAt = now;
-      return doc;
-    });
-
-    const insertRes = await collection.insertMany(docs);
-    const insertedIds = Object.values(insertRes.insertedIds || {});
-    let inserted = await collection.find({ _id: { $in: insertedIds } }).toArray();
-
-    inserted = inserted.map((d) => {
-      const clone = { ...d };
-      if (clone.__v !== undefined) delete clone.__v;
-      return clone;
-    });
-
-    return res.status(201).json({
-      ok: true,
-      method,
-      insertedCount: insertRes.insertedCount,
-      data: inserted,
-    });
   } catch (err) {
     console.error("Execute backend API failed:", err);
-    return res
-      .status(500)
-      .json({
-        ok: false,
-        message: "Failed to execute backend API",
-        error: err.message,
-      });
+    return res.status(500).json({ ok: false, message: "Failed to execute backend API", error: err.message });
   }
 };
 
