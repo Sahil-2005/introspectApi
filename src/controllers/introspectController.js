@@ -120,8 +120,57 @@ const listCollections = async (req, res) => {
  * GET /api/introspect/documents?dbName=...&collectionName=...&limit=10
  * Fetch data from a specific collection
  */
+// const getDocuments = async (req, res) => {
+//   const { dbName, collectionName, limit } = req.query;
+
+//   if (!dbName || !collectionName) {
+//     return res.status(400).json({
+//       ok: false,
+//       message: "Query params dbName and collectionName are required",
+//     });
+//   }
+
+//   const docsLimit = Number(limit) > 0 ? Number(limit) : 10;
+
+//   try {
+//     if (mongoose.connection.readyState !== 1) {
+//       return res.status(503).json({
+//         ok: false,
+//         message: "Mongoose is not connected",
+//       });
+//     }
+
+//     const db = mongoose.connection.client.db(dbName);
+//     const collection = db.collection(collectionName);
+
+//     const documents = await collection.find({}).limit(docsLimit).toArray();
+
+//     return res.json({
+//       ok: true,
+//       dbName,
+//       collectionName,
+//       limit: docsLimit,
+//       count: documents.length,
+//       documents,
+//     });
+//   } catch (err) {
+//     console.error("Get documents failed:", err);
+//     return res.status(500).json({
+//       ok: false,
+//       message: "Failed to fetch documents",
+//       error: err.message,
+//     });
+//   }
+// };
+
+// src/controllers/introspectController.js
+
+/**
+ * GET /api/introspect/documents?dbName=...&collectionName=...&limit=10&filter={...}
+ * Fetch data from a specific collection with optional filtering
+ */
 const getDocuments = async (req, res) => {
-  const { dbName, collectionName, limit } = req.query;
+  const { dbName, collectionName, limit, filter } = req.query;
 
   if (!dbName || !collectionName) {
     return res.status(400).json({
@@ -143,7 +192,28 @@ const getDocuments = async (req, res) => {
     const db = mongoose.connection.client.db(dbName);
     const collection = db.collection(collectionName);
 
-    const documents = await collection.find({}).limit(docsLimit).toArray();
+    // 1. Parse the filter if provided (expected as a JSON string)
+    let query = {};
+    if (filter) {
+      try {
+        query = JSON.parse(filter);
+        
+        // CRITICAL: Convert string _id to ObjectId if necessary
+        // When using the native driver, we must cast _id manually
+        if (query._id && typeof query._id === 'string') {
+            query._id = new mongoose.Types.ObjectId(query._id);
+        }
+        // Handle array of IDs (for $in queries)
+        if (query._id && query._id.$in) {
+             query._id.$in = query._id.$in.map(id => new mongoose.Types.ObjectId(id));
+        }
+
+      } catch (e) {
+        console.warn("Invalid filter JSON:", e);
+      }
+    }
+
+    const documents = await collection.find(query).limit(docsLimit).toArray();
 
     return res.json({
       ok: true,
