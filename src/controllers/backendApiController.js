@@ -412,7 +412,15 @@ const executeBackendApi = async (req, res) => {
     const db = mongoose.connection.client.db(dbName);
     const collection = db.collection(collectionName);
 
-    const method = (api.request || "GET").toUpperCase();
+    // Original request method stored on the API
+    const rawMethod = (api.request || "GET").toUpperCase();
+    // NEW: optional aggregationMethod coming from meta when the UI selects an aggregation while using GET
+    const aggregationMethod = api.meta?.aggregationMethod
+      ? String(api.meta.aggregationMethod).toUpperCase()
+      : null;
+    // Effective method: if the API was created as GET with an aggregation selected,
+    // we treat it as that aggregation method so existing aggregation logic stays the same.
+    const method = rawMethod === "GET" && aggregationMethod ? aggregationMethod : rawMethod;
     const payload = req.body?.payload ?? {};
     const now = new Date();
 
