@@ -456,6 +456,7 @@ const createDatabaseAndCollection = async (req, res) => {
       }
 
       // Seed a single document so UI can surface columns immediately
+      // Or update existing documents to include new fields
       if (Array.isArray(colSchemaFields) && colSchemaFields.length > 0) {
         const seed = {};
         colSchemaFields.forEach((field) => {
@@ -472,7 +473,27 @@ const createDatabaseAndCollection = async (req, res) => {
         const col = db.collection(colName);
         const existingDoc = await col.findOne({});
         if (!existingDoc) {
+          // No documents exist, insert seed document
           await col.insertOne(seed);
+        } else {
+          // Documents exist - update all documents to add new fields that don't exist
+          // Build $set object only for fields that should be added
+          const updateFields = {};
+          for (const [fieldName, defaultValue] of Object.entries(seed)) {
+            // Use $set with dot notation check isn't possible in update, so we add all fields
+            // MongoDB will only set the field if we use $setOnInsert behavior or check existence
+            updateFields[fieldName] = { $ifNull: [`$${fieldName}`, defaultValue] };
+          }
+          
+          // Use updateMany with aggregation pipeline to set fields only if they don't exist
+          const pipeline = [];
+          const setObj = {};
+          for (const [fieldName, defaultValue] of Object.entries(seed)) {
+            setObj[fieldName] = { $ifNull: [`$${fieldName}`, defaultValue] };
+          }
+          if (Object.keys(setObj).length > 0) {
+            await col.updateMany({}, [{ $set: setObj }]);
+          }
         }
       }
     }
