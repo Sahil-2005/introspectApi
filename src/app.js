@@ -4,6 +4,7 @@ const cors = require("cors");
 const introspectRoutes = require("./routes/introspectRoutes");
 
 const relationsRoutes = require("./routes/relationsRoutes");
+const relationMetadataRoutes = require("./routes/relationMetadataRoutes");
 const backendApiRoutes = require("./routes/backendApiRoutes");
 const { protect, authorizeRoles } = require("./middleware/authMiddleware");
 const cookieParser = require('cookie-parser');
@@ -28,6 +29,7 @@ app.get("/", (req, res) => {
 // Mount introspection routes under /api
 app.use("/api/introspect", protect, authorizeRoles("admin"), introspectRoutes);
 app.use("/api/relations", protect, authorizeRoles("admin"), relationsRoutes);
+app.use("/api/relation-metadata", protect, authorizeRoles("admin"), relationMetadataRoutes);
 app.use("/api/backend-apis", protect, authorizeRoles("admin"), backendApiRoutes);
 
 // Health alias at /api/health

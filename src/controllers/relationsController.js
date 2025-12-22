@@ -66,6 +66,7 @@
 
 
 const mongoose = require("mongoose");
+const RelationMetadata = require("../models/relationMetadata");
 
 exports.getRelations = async (req, res) => {
   try {
@@ -80,6 +81,8 @@ exports.getRelations = async (req, res) => {
       return res.status(200).json({ success: true, data: {} });
     }
 
+    const dbName = db.databaseName;
+
     // 2. Get all actual collections in the connected DB
     const collections = await db.listCollections().toArray();
     const collectionNames = collections.map((c) => c.name);
@@ -87,17 +90,51 @@ exports.getRelations = async (req, res) => {
     // Helper: Map collection names to potential references (e.g. "users" -> "User")
     const normalizeName = (name) => name.toLowerCase().replace(/s$/, ""); 
 
+    // Track all detected relations for syncing to RelationMetadata
+    const detectedRelations = [];
+
     for (const col of collections) {
       const colName = col.name;
       const modelName = getModelNameFromCollection(colName);
       
       // -- STRATEGY A: Use Mongoose Schema (if defined in code) --
       if (modelName && mongoose.models[modelName]) {
-        relations[colName] = getRelationsFromSchema(mongoose.models[modelName].schema);
+        const schemaRels = getRelationsFromSchema(mongoose.models[modelName].schema, colName);
+        relations[colName] = schemaRels.map(r => r.targetCollection);
+        detectedRelations.push(...schemaRels.map(r => ({ ...r, dbName, sourceCollection: colName })));
       } 
       // -- STRATEGY B: Infer from Data (for custom/external DBs) --
       else {
-        relations[colName] = await inferRelationsFromData(db, colName, collectionNames);
+        const inferredRels = await inferRelationsFromData(db, colName, collectionNames);
+        relations[colName] = inferredRels.map(r => r.targetCollection);
+        detectedRelations.push(...inferredRels.map(r => ({ ...r, dbName, sourceCollection: colName })));
+      }
+    }
+
+    // Sync detected relations to RelationMetadata collection (upsert to avoid duplicates)
+    for (const rel of detectedRelations) {
+      try {
+        await RelationMetadata.findOneAndUpdate(
+          {
+            dbName: rel.dbName,
+            sourceCollection: rel.sourceCollection,
+            sourceField: rel.sourceField
+          },
+          {
+            dbName: rel.dbName,
+            sourceCollection: rel.sourceCollection,
+            sourceField: rel.sourceField,
+            targetCollection: rel.targetCollection,
+            relationType: rel.relationType || 'many-to-one',
+            isRequired: false,
+            autoPopulate: false,
+            inferredFromSchema: true // Mark as auto-detected
+          },
+          { upsert: true, new: true, setDefaultsOnInsert: true }
+        );
+      } catch (syncErr) {
+        // Ignore sync errors - don't fail the whole request
+        console.warn(`Failed to sync relation ${rel.sourceCollection}.${rel.sourceField}:`, syncErr.message);
       }
     }
 
@@ -128,30 +165,40 @@ function getModelNameFromCollection(collectionName) {
 
 /**
  * Extracts refs from a defined Mongoose Schema
+ * Returns array of { sourceField, targetCollection, relationType }
  */
-function getRelationsFromSchema(schema) {
-  const refs = new Set();
+function getRelationsFromSchema(schema, sourceCollectionName) {
+  const refs = [];
   
   schema.eachPath((pathname, schemaType) => {
     // Direct ref (e.g. user: { type: ObjectId, ref: 'User' })
     if (schemaType.options?.ref) {
-      refs.add(schemaType.options.ref);
+      refs.push({
+        sourceField: pathname,
+        targetCollection: schemaType.options.ref.toLowerCase() + 's', // Convert model name to collection
+        relationType: 'many-to-one'
+      });
     }
     // Array ref (e.g. users: [{ type: ObjectId, ref: 'User' }])
     if (schemaType.$isMongooseArray && schemaType.caster?.options?.ref) {
-      refs.add(schemaType.caster.options.ref);
+      refs.push({
+        sourceField: pathname,
+        targetCollection: schemaType.caster.options.ref.toLowerCase() + 's',
+        relationType: 'many-to-many'
+      });
     }
   });
 
-  return Array.from(refs);
+  return refs;
 }
 
 /**
  * Scans a real document to guess relations based on field names.
  * e.g. "categoryId" field -> likely points to "categories" collection
+ * Returns array of { sourceField, targetCollection, relationType }
  */
 async function inferRelationsFromData(db, colName, allCollections) {
-  const refs = new Set();
+  const refs = [];
   
   // Fetch one sample document
   const docs = await db.collection(colName).find().limit(1).toArray();
@@ -188,11 +235,15 @@ async function inferRelationsFromData(db, colName, allCollections) {
       if (targetCol && targetCol !== colName) {
          // Verify value looks like an ID (optional but safer)
          if (isIdLike(value) || (Array.isArray(value) && value.some(isIdLike))) {
-           refs.add(targetCol);
+           refs.push({
+             sourceField: key,
+             targetCollection: targetCol,
+             relationType: Array.isArray(value) ? 'many-to-many' : 'many-to-one'
+           });
          }
       }
     }
   });
 
-  return Array.from(refs);
+  return refs;
 }

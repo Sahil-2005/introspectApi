@@ -1,5 +1,6 @@
 // src/controllers/introspectController.js
 const mongoose = require("mongoose");
+const RelationMetadata = require("../models/relationMetadata");
 
 /**
  * GET /api/health
@@ -370,9 +371,16 @@ const createDatabaseAndCollection = async (req, res) => {
           } else if (typeof field === "object" && field.name) {
             fieldName = field.name.trim();
             
-            // Start with base type
-            const bsonType = field.type || "string";
-            fieldConfig = { bsonType: [bsonType, "null"] };
+            // Check if this is a reference field
+            if (field.ref === true && field.refCollection) {
+              // Reference fields are ObjectId type
+              fieldConfig = { bsonType: ["objectId", "null"] };
+              fieldConfig.description = `Reference to ${field.refCollection} collection`;
+            } else {
+              // Start with base type
+              const bsonType = field.type || "string";
+              fieldConfig = { bsonType: [bsonType, "null"] };
+            }
 
             // Apply validators/modifiers from the field
             if (field.validators && typeof field.validators === "object") {
@@ -493,6 +501,39 @@ const createDatabaseAndCollection = async (req, res) => {
           }
           if (Object.keys(setObj).length > 0) {
             await col.updateMany({}, [{ $set: setObj }]);
+          }
+        }
+      }
+
+      // Save relation metadata for reference fields
+      if (Array.isArray(colSchemaFields)) {
+        for (const field of colSchemaFields) {
+          if (typeof field === "object" && field.ref === true && field.refCollection) {
+            const fieldName = field.name?.trim();
+            if (fieldName) {
+              try {
+                // Upsert to avoid duplicates
+                await RelationMetadata.findOneAndUpdate(
+                  { 
+                    dbName, 
+                    sourceCollection: colName, 
+                    sourceField: fieldName 
+                  },
+                  {
+                    dbName,
+                    sourceCollection: colName,
+                    sourceField: fieldName,
+                    targetCollection: field.refCollection,
+                    relationType: 'many-to-one', // Default - a field holds one reference
+                    isRequired: false,
+                    autoPopulate: false,
+                  },
+                  { upsert: true, new: true }
+                );
+              } catch (relErr) {
+                console.warn(`Failed to save relation metadata for ${colName}.${fieldName}:`, relErr.message);
+              }
+            }
           }
         }
       }
