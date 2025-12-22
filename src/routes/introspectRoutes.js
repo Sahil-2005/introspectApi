@@ -6,13 +6,17 @@ const {
   listCollections,
   getDocuments,
   connectCustomDb,
-  listColumns
+  listColumns,
+  createDatabaseAndCollection,
 } = require("../controllers/introspectController");
 
 const router = express.Router();
 
 
 router.post("/connect", connectCustomDb);
+
+// Create DB + collection (and optional schema metadata)
+router.post("/create-db", createDatabaseAndCollection);
 
 
 // Health / connection

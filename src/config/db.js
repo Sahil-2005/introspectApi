@@ -5,7 +5,8 @@ const mongoose = require("mongoose");
 async function connectDB() {
   try {
     // await mongoose.connect(MONGO_URI || 'mongodb+srv://devteam_db_user:cSvIHgoaFX48RuO4@sage.81ahy6f.mongodb.net/sage?retryWrites=true&w=majority&appName=sage', {
-      await mongoose.connect('mongodb+srv://devteam_db_user:cSvIHgoaFX48RuO4@sage.81ahy6f.mongodb.net/sage?retryWrites=true&w=majority&appName=sage', {  
+      // await mongoose.connect('mongodb+srv://devteam_db_user:cSvIHgoaFX48RuO4@sage.81ahy6f.mongodb.net/sage?retryWrites=true&w=majority&appName=sage', {
+        await mongoose.connect('mongodb://localhost:27017', {  
     // options mostly not needed in latest Mongoose but kept for clarity
       autoIndex: false,
     });

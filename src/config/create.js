@@ -13,7 +13,7 @@ connectDB();
 async function seedAdmin() {
   try {
     // Check if admin already exists
-    const exists = await Admin.findOne({ email: "yusufkondkari07@gmail.com" });
+    const exists = await Admin.findOne({ email: "deep@gmail.com" });
 
     if (exists) {
       console.log("Admin already exists");
@@ -25,12 +25,12 @@ async function seedAdmin() {
 
     // Create admin
     await Admin.create({
-      email: "yusufkondkari07@gmail.com",
+      email: "deep@gmail.com",
       password: hashedPassword
     });
 
     console.log("Admin seeded successfully");
-    console.log("Email: yusufkondkari07@gmail.com");
+    console.log("Email: deep@gmail.com");
     console.log("Password: admin123");
 
     process.exit();

@@ -297,11 +297,99 @@ const connectCustomDb = async (req, res) => {
   }
 };
 
+/**
+ * POST /api/introspect/create-db
+ * Create a new database + collection and optionally apply a validator + seed doc with the provided fields.
+ * Body: { dbName, collectionName, schemaFields?: string[] }
+ *
+ * Notes:
+ * - MongoDB creates the DB on first collection creation.
+ * - We apply a collection validator (jsonSchema) when fields are provided.
+ * - We also seed a single document with the provided fields (null values) so the UI can see the fields immediately.
+ */
+const createDatabaseAndCollection = async (req, res) => {
+  try {
+    const { dbName, collectionName, schemaFields } = req.body || {};
+
+    if (!dbName || !collectionName) {
+      return res.status(400).json({
+        ok: false,
+        message: "Fields 'dbName' and 'collectionName' are required",
+      });
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+      return res.status(503).json({
+        ok: false,
+        message: "Mongoose is not connected",
+      });
+    }
+
+    const client = mongoose.connection.client;
+    const db = client.db(dbName);
+
+    // Build validator from schemaFields (optional)
+    let validator = {};
+    if (Array.isArray(schemaFields) && schemaFields.length > 0) {
+      const props = {};
+      schemaFields.forEach((f) => {
+        if (typeof f === "string" && f.trim()) {
+          props[f.trim()] = { bsonType: ["string", "number", "object", "array", "bool", "null"] };
+        }
+      });
+      validator = {
+        $jsonSchema: {
+          bsonType: "object",
+          required: Object.keys(props),
+          properties: props,
+        },
+      };
+    }
+
+    // Check if collection already exists
+    const existing = await db.listCollections({ name: collectionName }).toArray();
+    if (existing.length === 0) {
+      await db.createCollection(collectionName, validator && Object.keys(validator).length ? { validator } : {});
+    } else if (validator && Object.keys(validator).length) {
+      // Apply/merge validator on existing collection
+      await db.command({ collMod: collectionName, validator });
+    }
+
+    // Seed a single document so UI can surface columns immediately
+    if (Array.isArray(schemaFields) && schemaFields.length > 0) {
+      const seed = {};
+      schemaFields.forEach((f) => {
+        if (typeof f === "string" && f.trim()) seed[f.trim()] = null;
+      });
+      const col = db.collection(collectionName);
+      const existingDoc = await col.findOne({});
+      if (!existingDoc) {
+        await col.insertOne(seed);
+      }
+    }
+
+    return res.status(201).json({
+      ok: true,
+      message: "Database/collection created (or already existed)",
+      dbName,
+      collectionName,
+    });
+  } catch (err) {
+    console.error("Create DB/collection failed:", err);
+    return res.status(500).json({
+      ok: false,
+      message: "Failed to create database/collection",
+      error: err.message,
+    });
+  }
+};
+
 module.exports = {
   checkConnection,
   listDatabases,
   listCollections,
   getDocuments,
   connectCustomDb,
-  listColumns
+  listColumns,
+  createDatabaseAndCollection,
 };
