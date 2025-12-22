@@ -300,21 +300,37 @@ const connectCustomDb = async (req, res) => {
 /**
  * POST /api/introspect/create-db
  * Create a new database + collection and optionally apply a validator + seed doc with the provided fields.
- * Body: { dbName, collectionName, schemaFields?: string[] }
+ * Body: { dbName, collectionName, schemaFields?: Array<{name: string, type?: string, validators?: object}> | string[] }
  *
  * Notes:
  * - MongoDB creates the DB on first collection creation.
  * - We apply a collection validator (jsonSchema) when fields are provided.
  * - We also seed a single document with the provided fields (null values) so the UI can see the fields immediately.
+ * - Fields can be provided as strings or as objects with validators/modifiers.
+ * 
+ * Example:
+ * schemaFields: [
+ *   "simpleField",
+ *   { 
+ *     name: "email", 
+ *     type: "string",
+ *     validators: {
+ *       pattern: "^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$",
+ *       minLength: 5,
+ *       maxLength: 255
+ *     }
+ *   }
+ * ]
  */
 const createDatabaseAndCollection = async (req, res) => {
   try {
-    const { dbName, collectionName, schemaFields } = req.body || {};
+    const { dbName, collectionName, schemaFields, collections } = req.body || {};
 
-    if (!dbName || !collectionName) {
+    // Validate: must have dbName and either collectionName or collections array
+    if (!dbName || (!collectionName && (!Array.isArray(collections) || collections.length === 0))) {
       return res.status(400).json({
         ok: false,
-        message: "Fields 'dbName' and 'collectionName' are required",
+        message: "Fields 'dbName' and either 'collectionName' or 'collections' array are required",
       });
     }
 
@@ -328,43 +344,136 @@ const createDatabaseAndCollection = async (req, res) => {
     const client = mongoose.connection.client;
     const db = client.db(dbName);
 
-    // Build validator from schemaFields (optional)
-    let validator = {};
-    if (Array.isArray(schemaFields) && schemaFields.length > 0) {
-      const props = {};
-      schemaFields.forEach((f) => {
-        if (typeof f === "string" && f.trim()) {
-          props[f.trim()] = { bsonType: ["string", "number", "object", "array", "bool", "null"] };
+    // Support creating/updating multiple collections at once
+    // Backwards-compatible: if `collections` array passed, use it; otherwise use single collectionName + schemaFields
+    const collectionsToProcess = Array.isArray(collections)
+      ? collections
+      : [{ collectionName, schemaFields }];
+
+    for (const c of collectionsToProcess) {
+      const colName = c.collectionName || c.name || collectionName;
+      const colSchemaFields = Array.isArray(c.schemaFields) ? c.schemaFields : Array.isArray(schemaFields) ? schemaFields : [];
+
+      // Build validator from colSchemaFields (optional)
+      let validator = {};
+      if (Array.isArray(colSchemaFields) && colSchemaFields.length > 0) {
+        const props = {};
+        const requiredFields = [];
+        
+        colSchemaFields.forEach((field) => {
+          let fieldName, fieldConfig;
+
+          // Handle both string format and object format
+          if (typeof field === "string" && field.trim()) {
+            fieldName = field.trim();
+            fieldConfig = { bsonType: ["string", "number", "object", "array", "bool", "null"] };
+          } else if (typeof field === "object" && field.name) {
+            fieldName = field.name.trim();
+            
+            // Start with base type
+            const bsonType = field.type || "string";
+            fieldConfig = { bsonType: [bsonType, "null"] };
+
+            // Apply validators/modifiers from the field
+            if (field.validators && typeof field.validators === "object") {
+              const validators = field.validators;
+
+              // String validators
+              if (validators.minLength !== undefined) {
+                fieldConfig.minLength = Number(validators.minLength);
+              }
+              if (validators.maxLength !== undefined) {
+                fieldConfig.maxLength = Number(validators.maxLength);
+              }
+              if (validators.pattern) {
+                fieldConfig.pattern = validators.pattern;
+              }
+
+              // Number validators
+              if (validators.minimum !== undefined) {
+                fieldConfig.minimum = Number(validators.minimum);
+              }
+              if (validators.maximum !== undefined) {
+                fieldConfig.maximum = Number(validators.maximum);
+              }
+
+              // Enum
+              if (Array.isArray(validators.enum) && validators.enum.length > 0) {
+                fieldConfig.enum = validators.enum;
+              }
+
+              // Default value
+              if (validators.default !== undefined) {
+                fieldConfig.default = validators.default;
+              }
+
+              // Description
+              if (validators.description) {
+                fieldConfig.description = validators.description;
+              }
+
+              // Custom regex pattern for email, url, etc
+              if (validators.format) {
+                fieldConfig.format = validators.format;
+              }
+
+              // Example
+              if (validators.example !== undefined) {
+                fieldConfig.example = validators.example;
+              }
+
+              // Multi-type support
+              if (Array.isArray(validators.multiType) && validators.multiType.length > 0) {
+                fieldConfig.bsonType = validators.multiType;
+              }
+            }
+          }
+
+          if (fieldName) {
+            props[fieldName] = fieldConfig;
+            requiredFields.push(fieldName);
+          }
+        });
+
+        if (Object.keys(props).length > 0) {
+          validator = {
+            $jsonSchema: {
+              bsonType: "object",
+              required: requiredFields,
+              properties: props,
+            },
+          };
         }
-      });
-      validator = {
-        $jsonSchema: {
-          bsonType: "object",
-          required: Object.keys(props),
-          properties: props,
-        },
-      };
-    }
+      }
 
-    // Check if collection already exists
-    const existing = await db.listCollections({ name: collectionName }).toArray();
-    if (existing.length === 0) {
-      await db.createCollection(collectionName, validator && Object.keys(validator).length ? { validator } : {});
-    } else if (validator && Object.keys(validator).length) {
-      // Apply/merge validator on existing collection
-      await db.command({ collMod: collectionName, validator });
-    }
+      // Check if collection already exists
+      const existing = await db.listCollections({ name: colName }).toArray();
+      if (existing.length === 0) {
+        await db.createCollection(colName, validator && Object.keys(validator).length ? { validator } : {});
+      } else if (validator && Object.keys(validator).length) {
+        // Apply/merge validator on existing collection
+        await db.command({ collMod: colName, validator });
+      }
 
-    // Seed a single document so UI can surface columns immediately
-    if (Array.isArray(schemaFields) && schemaFields.length > 0) {
-      const seed = {};
-      schemaFields.forEach((f) => {
-        if (typeof f === "string" && f.trim()) seed[f.trim()] = null;
-      });
-      const col = db.collection(collectionName);
-      const existingDoc = await col.findOne({});
-      if (!existingDoc) {
-        await col.insertOne(seed);
+      // Seed a single document so UI can surface columns immediately
+      if (Array.isArray(colSchemaFields) && colSchemaFields.length > 0) {
+        const seed = {};
+        colSchemaFields.forEach((field) => {
+          let fieldName;
+          let defaultValue = null;
+          if (typeof field === "string" && field.trim()) {
+            fieldName = field.trim();
+          } else if (typeof field === "object" && field.name) {
+            fieldName = field.name.trim();
+            if (field.validators && field.validators.default !== undefined) defaultValue = field.validators.default;
+          }
+          if (fieldName) seed[fieldName] = defaultValue;
+        });
+        const col = db.collection(colName);
+        const existingDoc = await col.findOne({});
+        if (!existingDoc) {
+          await col.insertOne(seed);
+        }
       }
     }
 
